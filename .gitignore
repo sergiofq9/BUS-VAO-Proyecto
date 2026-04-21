@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.streamlit/secrets.toml
+data/*.csv
+models/*.pt
+.DS_Store
+# --- Entornos Virtuales ---
+venv/
+.venv/
+env/
+bin/
+lib/
+include/
+pyvenv.cfg
