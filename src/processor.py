@@ -26,7 +26,7 @@ def analizar_trafico(imagen_pil):
             nivel = "Verde"
         elif conteo < 35: 
             nivel = "Amarillo"
-        elif conteo < 50: 
+        elif conteo < 45: 
             nivel = "Naranja"
         else: 
             nivel = "Rojo"
