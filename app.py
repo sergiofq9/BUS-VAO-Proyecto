@@ -4,11 +4,37 @@ from PIL import Image
 from io import BytesIO
 from src.dgt_utils import descargar_foto_dgt
 import time
- 
+import requests
 # Fíjate que hemos quitado la función que daba el ImportError
 from src.processor import analizar_trafico, analizar_panel_automatico
  
 st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_state="expanded")
+
+@st.cache_data(ttl=900) # Ahora se actualiza cada 15 minutos
+def obtener_clima(lat, lon):
+    try:
+        url = f"https://api.open-meteo.com/v1/forecast?latitude={lat}&longitude={lon}&current_weather=true"
+        res = requests.get(url, timeout=5).json()
+        temp = res['current_weather']['temperature']
+        code = res['current_weather']['weathercode']
+        
+        # Miramos si es de noche (entre las 22:00 y las 06:00)
+        hora_actual = time.localtime().tm_hour
+        es_noche = hora_actual >= 22 or hora_actual < 6
+        
+        alerta = ""
+        if code in [0, 1]: estado = "☀️ Despejado"
+        elif code in [2, 3]: estado = "⛅ Nublado"
+        elif code in [51, 53, 55, 61, 63, 65, 80, 81, 82]: 
+            estado = "🌧️ Lluvia"
+            # Si llueve y NO es de noche, entonces sí ponemos la alerta
+            if not es_noche:
+                alerta = "⚠️ Posible retención por clima"
+        else: estado = "🌤️ Normal"
+        
+        return f"{estado} ({temp}ºC)", alerta
+    except:
+        return "🌤️ Info no disponible", ""
 
 # --- BLOQUE DE ESTILO CSS ---
 st.markdown("""
@@ -48,6 +74,27 @@ st.markdown("""
 # --- BARRA LATERAL (SIDEBAR) ---
 col_lateral, col_principal = st.columns([1, 3], gap="large")
 with col_lateral:
+    clima_rozas, alerta_roz = obtener_clima(40.49, -3.87)
+    clima_madrid, alerta_mad = obtener_clima(40.41, -3.70)
+    
+    alerta_html = ""
+    if alerta_roz or alerta_mad:
+        alerta_html = f'<div style="background-color: rgba(248, 113, 113, 0.2); border-left: 4px solid #f87171; padding: 8px; margin-top: 15px; border-radius: 4px;"><span style="color: #f87171; font-size: 0.85em; font-weight: bold;">{alerta_roz or alerta_mad}</span></div>'
+
+    st.markdown(f"""
+<div style="background:#1e293b; padding:20px; border-radius:15px; border:1px solid #334155; margin-bottom: 15px;">
+    <h4 style="margin-top:0; color: #38bdf8;">☁️ Meteorología</h4>
+    <div style="display: flex; justify-content: space-between; margin-bottom: 8px; border-bottom: 1px solid #334155; padding-bottom: 5px;">
+        <span style="color: #94a3b8; font-size: 0.9em;">Las Rozas:</span>
+        <span style="color: white; font-weight: bold; font-size: 0.95em;">{clima_rozas}</span>
+    </div>
+    <div style="display: flex; justify-content: space-between;">
+        <span style="color: #94a3b8; font-size: 0.9em;">Madrid:</span>
+        <span style="color: white; font-weight: bold; font-size: 0.95em;">{clima_madrid}</span>
+    </div>
+    {alerta_html}
+</div>
+""", unsafe_allow_html=True)
     st.markdown("""
 <style>
     /* Esto arregla el botón para que sea azul con letras negras legibles */
