@@ -10,6 +10,73 @@ from src.processor import analizar_trafico, analizar_panel_automatico
  
 st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_state="expanded")
 
+@st.cache_data(ttl=3600)
+def obtener_eventos_reales_madrid():
+    try:
+        # Portal de Datos Abiertos del Ayto. de Madrid (Agenda de hoy)
+        url = "https://datos.madrid.es/egob/catalogo/206974-0-agenda-eventos-culturales-100.json"
+        res = requests.get(url, timeout=10)
+        datos = res.json()
+        
+        eventos_hoy = []
+        # Lugares que suelen afectar al tráfico de entrada/salida
+        recintos_clave = ["Wizink", "IFEMA", "Bernabéu", "Metropolitano", "Palacio de Cristal", "Madrid Arena"]
+        
+        for item in datos.get('@graph', []):
+            titulo = item.get('title', '')
+            lugar = item.get('address', {}).get('area', {}).get('street-address', 'Madrid')
+            hora = item.get('dtstart', '').split('T')[-1][:5] # Extraemos HH:MM
+            
+            # Clasificamos impacto según el lugar
+            impacto = "Medio"
+            for r in recintos_clave:
+                if r.lower() in lugar.lower() or r.lower() in titulo.lower():
+                    impacto = "Alto"
+                    break
+            
+            eventos_hoy.append({
+                "titulo": titulo,
+                "lugar": lugar,
+                "hora": hora,
+                "impacto": impacto
+            })
+            
+        return eventos_hoy[:6] # Devolvemos los 6 primeros para no saturar
+    except:
+        return []
+
+@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+def obtener_incidencias_a6():
+    try:
+        # Fuente oficial: Punto de Acceso Nacional de Información de Tráfico
+        url = "https://www.dgt.es/estaticos/movilidad/incidencias-movilidad.json"
+        res = requests.get(url, timeout=10).json()
+        incidencias = res.get('incidencias', [])
+        
+        avisos = []
+        for inc in incidencias:
+            # Filtramos solo la A-6 en Madrid
+            if inc.get('carretera') == 'A-6' and inc.get('provincia') == 'MADRID':
+                tipo = inc.get('tipo', 'AVISO')
+                descripcion = inc.get('descripcion', 'Sin detalles')
+                pk_ini = inc.get('pk_ini', '?')
+                pk_fin = inc.get('pk_fin', '?')
+                
+                # Asignamos un emoji según el tipo
+                emoji = "⚠️"
+                if "ACCIDENTE" in tipo.upper(): emoji = "💥"
+                elif "OBRAS" in tipo.upper(): emoji = "🚧"
+                elif "METEOROL" in tipo.upper(): emoji = "❄️"
+                
+                avisos.append({
+                    "icono": emoji,
+                    "titulo": tipo,
+                    "info": f"KM {pk_ini} al {pk_fin}: {descripcion}"
+                })
+        return avisos
+    except:
+        return []
+
 @st.cache_data(ttl=900) # Ahora se actualiza cada 15 minutos
 def obtener_clima(lat, lon):
     try:
@@ -95,6 +162,24 @@ with col_lateral:
     {alerta_html}
 </div>
 """, unsafe_allow_html=True)
+    
+    st.markdown("---")
+    st.markdown("### 🚦 Avisos DGT (A-6)")
+    
+    incidencias_reales = obtener_incidencias_a6()
+    
+    if not incidencias_reales:
+        st.success("✅ Sin incidencias reportadas ahora mismo.")
+    else:
+        for aviso in incidencias_reales:
+            st.markdown(f"""
+        <div style="background: rgba(248, 113, 113, 0.1); padding: 12px; border-radius: 10px; border-left: 5px solid #f87171; margin-bottom: 10px;">
+            <span style="font-size: 1.2em;">{aviso['icono']}</span> 
+            <b style="color: white;">{aviso['titulo']}</b><br>
+            <span style="color: #cbd5e1; font-size: 0.85em;">{aviso['info']}</span>
+        </div>
+        """, unsafe_allow_html=True)
+
     st.markdown("""
 <style>
     /* Esto arregla el botón para que sea azul con letras negras legibles */
@@ -138,7 +223,7 @@ with col_principal:
  
     st.title("Información sobre el BUS VAO de la A-6")
     
-    tab_madrid, tab_rozas = st.tabs(["➡️ DIRECCIÓN MADRID", "➡️ DIRECCIÓN LAS ROZAS"])
+    tab_madrid, tab_rozas, tab_eventos = st.tabs(["➡️ DIRECCIÓN MADRID", "➡️ DIRECCIÓN LAS ROZAS", "📅 EVENTOS EN MADRID"])
     
     def mostrar_bloque_direccion(cam_panel, diccionario_cams_trafico, tipo_panel="VETERINARIA"):
         t_col1, t_col2 = st.columns([4, 1])
@@ -163,7 +248,7 @@ with col_principal:
                     if data['estado'] == "DESCONOCIDO": st.info(f"❓ {l}")
                     else: st.write(f"{'✅' if v else '❌'} {l}")
                 tag("BUS", data['bus']); tag("MOTOS", data['motos'])
-                tag("🚗 +2 OCUP", data['mas2']); tag("🔌 CERO", data['cero'])
+                tag("🚗 +2 OCUP", data['mas2']); tag("🔌 CERO EMISIONES", data['cero'])
     
         st.markdown("---")
         st.subheader("🚥 Niveles de Tráfico")
@@ -210,5 +295,31 @@ with col_principal:
             },
             "ROZAS"
         )
+    with tab_eventos:
+        st.subheader("📅 Eventos Madrid (Hoy)")
+        st.caption("Fuente: Datos Abiertos del Ayuntamiento de Madrid")
+
+        eventos = obtener_eventos_reales_madrid()
+        
+        if not eventos:
+            st.write("✨ No hay grandes eventos reportados para hoy.")
+        else:
+            for ev in eventos:
+                # Color según impacto
+                color = "#f87171" if ev['impacto'] == "Alto" else "#fbbf24"
+                
+                st.markdown(f"""
+                <div style="background:#1e293b; padding:15px; border-radius:10px; border-left: 5px solid {color}; margin-bottom:10px;">
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color:{color}; font-weight:bold; font-size:0.8em;">IMPACTO {ev['impacto'].upper()}</span>
+                        <span style="color:#94a3b8; font-size:0.8em;">🕒 {ev['hora']}</span>
+                    </div>
+                    <h5 style="margin:5px 0; color:white;">{ev['titulo']}</h5>
+                    <p style="margin:0; color:#cbd5e1; font-size:0.9em;">📍 {ev['lugar']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+
+        st.warning("👉 Los eventos en IFEMA y recintos del centro suelen complicar la A-6 unas 2 horas antes del inicio.")
+            
         st.markdown("---")
     st.caption("⚠️ **Aviso:** Este sistema de visión artificial puede cometer errores por deslumbramientos o baja visibilidad. Presta atención siempre a las imágenes de la carretera.")
