@@ -82,6 +82,7 @@ bus-vao-proyecto/
 ├── README.md             # Este archivo
 └── src/
     ├── __init__.py       # Inicialización del paquete
+    ├── dgt_utils.py       # Utilidades para descargar y gestionar datos de cámaras DGT
     └── processor.py      # Procesamiento de imágenes con YOLO y OpenCV
 ```
 
