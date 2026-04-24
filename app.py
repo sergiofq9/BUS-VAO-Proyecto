@@ -5,7 +5,6 @@ from io import BytesIO
 from src.dgt_utils import descargar_foto_dgt
 import time
 import requests
-# Fíjate que hemos quitado la función que daba el ImportError
 from src.processor import analizar_trafico, analizar_panel_automatico
  
 st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_state="expanded")
@@ -13,35 +12,43 @@ st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_stat
 @st.cache_data(ttl=3600)
 def obtener_eventos_reales_madrid():
     try:
-        # Portal de Datos Abiertos del Ayto. de Madrid (Agenda de hoy)
         url = "https://datos.madrid.es/egob/catalogo/206974-0-agenda-eventos-culturales-100.json"
         res = requests.get(url, timeout=10)
         datos = res.json()
         
         eventos_hoy = []
-        # Lugares que suelen afectar al tráfico de entrada/salida
-        recintos_clave = ["Wizink", "IFEMA", "Bernabéu", "Metropolitano", "Palacio de Cristal", "Madrid Arena"]
+        # Filtros mucho más estrictos (evitamos atrapar teatros de barrio)
+        recintos_rojo = ["wizink", "bernabéu", "bernabeu", "metropolitano", "madrid arena", "caja mágica"]
+        recintos_amarillo = ["ifema", "palacio de deportes", "auditorio nacional", "teatro real", "recinto ferial"]
         
         for item in datos.get('@graph', []):
-            titulo = item.get('title', '')
-            lugar = item.get('address', {}).get('area', {}).get('street-address', 'Madrid')
-            hora = item.get('dtstart', '').split('T')[-1][:5] # Extraemos HH:MM
+            titulo = item.get('title', '').lower()
+            lugar = item.get('address', {}).get('area', {}).get('street-address', 'Madrid').lower()
+            hora = item.get('dtstart', '').split('T')[-1][:5]
             
-            # Clasificamos impacto según el lugar
-            impacto = "Medio"
-            for r in recintos_clave:
-                if r.lower() in lugar.lower() or r.lower() in titulo.lower():
+            impacto = "Bajo"
+            
+            for r in recintos_rojo:
+                if r in lugar or r in titulo:
                     impacto = "Alto"
                     break
+                    
+            if impacto == "Bajo":
+                for a in recintos_amarillo:
+                    if a in lugar or a in titulo:
+                        impacto = "Medio"
+                        break
             
-            eventos_hoy.append({
-                "titulo": titulo,
-                "lugar": lugar,
-                "hora": hora,
-                "impacto": impacto
-            })
+            # 🚨 LA CLAVE: Solo guardamos los eventos masivos, descartamos los locales (Bajo)
+            if impacto in ["Alto", "Medio"]:
+                eventos_hoy.append({
+                    "titulo": item.get('title', ''), 
+                    "lugar": item.get('address', {}).get('area', {}).get('street-address', 'Madrid'),
+                    "hora": hora,
+                    "impacto": impacto
+                })
             
-        return eventos_hoy[:6] # Devolvemos los 6 primeros para no saturar
+        return eventos_hoy[:5] # Máximo 5 para no hacer una lista kilométrica
     except:
         return []
 
@@ -141,6 +148,10 @@ st.markdown("""
 # --- BARRA LATERAL (SIDEBAR) ---
 col_lateral, col_principal = st.columns([1, 3], gap="large")
 with col_lateral:
+
+    st.markdown("  ")
+    st.markdown("  ")
+
     clima_rozas, alerta_roz = obtener_clima(40.49, -3.87)
     clima_madrid, alerta_mad = obtener_clima(40.41, -3.70)
     
@@ -162,23 +173,24 @@ with col_lateral:
     {alerta_html}
 </div>
 """, unsafe_allow_html=True)
-    
-    st.markdown("---")
-    st.markdown("### 🚦 Avisos DGT (A-6)")
+        
+    st.markdown("<br>", unsafe_allow_html=True)
     
     incidencias_reales = obtener_incidencias_a6()
     
+    # Construimos el HTML sin triples comillas para evitar fallos de Streamlit
+    html_dgt = '<div style="background:#1e293b; padding:20px; border-radius:15px; border:1px solid #334155; margin-bottom: 15px;">'
+    html_dgt += '<h4 style="margin-top:0; color: #38bdf8;">🚦 Avisos DGT (A-6)</h4>'
+    
     if not incidencias_reales:
-        st.success("✅ Sin incidencias reportadas ahora mismo.")
+        html_dgt += '<div style="background-color: rgba(74, 222, 128, 0.15); border-left: 4px solid #4ade80; padding: 10px; border-radius: 4px;"><span style="color: #4ade80; font-weight: bold; font-size: 0.9em;">✅ Sin incidencias reportadas ahora mismo.</span></div>'
     else:
         for aviso in incidencias_reales:
-            st.markdown(f"""
-        <div style="background: rgba(248, 113, 113, 0.1); padding: 12px; border-radius: 10px; border-left: 5px solid #f87171; margin-bottom: 10px;">
-            <span style="font-size: 1.2em;">{aviso['icono']}</span> 
-            <b style="color: white;">{aviso['titulo']}</b><br>
-            <span style="color: #cbd5e1; font-size: 0.85em;">{aviso['info']}</span>
-        </div>
-        """, unsafe_allow_html=True)
+            html_dgt += f'<div style="background: rgba(248, 113, 113, 0.1); padding: 12px; border-radius: 10px; border-left: 5px solid #f87171; margin-bottom: 10px;"><span style="font-size: 1.2em;">{aviso["icono"]}</span> <b style="color: white;">{aviso["titulo"]}</b><br><span style="color: #cbd5e1; font-size: 0.85em;">{aviso["info"]}</span></div>'
+            
+    html_dgt += '</div>'
+    
+    st.markdown(html_dgt, unsafe_allow_html=True)
 
     st.markdown("""
 <style>
@@ -208,7 +220,8 @@ with col_lateral:
     <div style="background-color: #0f172a; padding: 10px; border-radius: 8px;">
         <span style="color: #4ade80;">🟢 Fluido</span><br>
         <span style="color: #facc15;">🟡 Denso</span><br>
-        <span style="color: #f87171;">🔴 Retenciones</span>
+        <span style="color: #ffa500;">🟠 Retenciones</span><br>
+        <span style="color: #f87171;">🔴 Atasco Importante</span><br>
     </div>
     <hr style="border-color: #334155; margin: 15px 0;">
     <h4 style="color: #38bdf8; margin-bottom: 10px;">⏱️ Horarios (L-V)</h4>
@@ -221,52 +234,98 @@ with col_lateral:
 """, unsafe_allow_html=True)
 with col_principal:
  
-    st.title("Información sobre el BUS VAO de la A-6")
+    st.title("Información A-6: Madrid - Las Rozas")
+
+    # --- ALERTA GLOBAL DE EVENTOS (Desplegable) ---
+    eventos = obtener_eventos_reales_madrid()
+
+    if eventos:
+        # Si hay eventos, sale un recuadro que se puede desplegar
+        with st.expander(f"📅 Atención: Hay {len(eventos)} eventos hoy en Madrid que pueden afectar al tráfico"):
+            for ev in eventos:
+                es_alto = "🔴" if ev['impacto'] == "Alto" else "🟡"
+                st.markdown(f"{es_alto} **{ev['hora']} | {ev['titulo']}** 📍 *{ev['lugar']}*")
+    else:
+        # Si no hay eventos, sale un mensaje verde fijo muy discreto
+        st.success("✅ Hoy no hay eventos multitudinarios que afecten al tráfico.")
+
     
-    tab_madrid, tab_rozas, tab_eventos = st.tabs(["➡️ DIRECCIÓN MADRID", "➡️ DIRECCIÓN LAS ROZAS", "📅 EVENTOS EN MADRID"])
+# --- AQUÍ YA VAN TUS PESTAÑAS (Solo dejas las dos de las cámaras) ---
+       
+    tab_madrid, tab_rozas= st.tabs(["➡️ DIRECCIÓN MADRID", "➡️ DIRECCIÓN LAS ROZAS"])
+
+    
     
     def mostrar_bloque_direccion(cam_panel, diccionario_cams_trafico, tipo_panel="VETERINARIA"):
-        t_col1, t_col2 = st.columns([4, 1])
-        with t_col1: st.subheader("🔳 Estado del Carril BUS-VAO")
-        with t_col2: 
-            if st.button("🔄 Actualizar", key=tipo_panel):
-                with st.spinner("🔄 Cargando..."):
-                    time.sleep(1) # Esto hace que el usuario vea la animación
-                    st.rerun()
+    # Título limpio
+        st.subheader("🔳 Estado del Carril BUS-VAO")
+                    
         img_p = descargar_foto_dgt(cam_panel)
         if img_p:
             c1, c2 = st.columns([2, 1])
-            with c1: st.image(img_p, width="stretch")
+            
+            with c1: 
+                # 1. ARREGLO DEL WARNING: Usamos el comando moderno que pide Streamlit
+                st.image(img_p, use_container_width=True)
+            
             with c2:
+                # 2. BAJAR EL BLOQUE: Metemos unos espacios invisibles para empujar hacia abajo
+                st.write("")
+                
                 data = analizar_panel_automatico(img_p, tipo_panel)
                 if data['estado'] == "ABIERTO": st.success(f"🟢 {data['estado']}")
                 elif data['estado'] == "CERRADO": st.error(f"🔴 {data['estado']}")
                 else: st.warning(f"⚠️ {data['estado']}")
                 
                 st.write("---")
-                def tag(l, v):
-                    if data['estado'] == "DESCONOCIDO": st.info(f"❓ {l}")
-                    else: st.write(f"{'✅' if v else '❌'} {l}")
-                tag("BUS", data['bus']); tag("MOTOS", data['motos'])
-                tag("🚗 +2 OCUP", data['mas2']); tag("🔌 CERO EMISIONES", data['cero'])
-    
-        st.markdown("---")
-        st.subheader("🚥 Niveles de Tráfico")
-    
-        cols = st.columns(3)
+                
+                col_a, col_b = st.columns(2)
+                
+                def tag_nativo(col, label, is_open):
+                    if data['estado'] == "DESCONOCIDO":
+                        col.info(f"❓ {label}")
+                    elif is_open:
+                        col.success(f"✅ {label}")
+                    else:
+                        col.error(f"❌ {label}")
+
+                with col_a:
+                    tag_nativo(col_a, "BUS", data.get('bus', False))
+                    tag_nativo(col_a, "🚗 +2 OCUP", data.get('mas2', False))
+                    
+                with col_b:
+                    tag_nativo(col_b, "MOTOS", data.get('motos', False))
+                    tag_nativo(col_b, "🔌 CERO EMIS.", data.get('cero', False))
+                
+                st.write("") 
+                if st.button("🔄 Actualizar", key=tipo_panel, use_container_width=True):
+                    with st.spinner("🔄 Cargando..."):
+                        time.sleep(1)
+                        st.rerun()    
+            st.markdown("---")
+            st.subheader("🚥 Niveles de Tráfico")
+            
+            cols = st.columns(3)
         i = 0
         for nombre_km, url in diccionario_cams_trafico.items():
             img_t = descargar_foto_dgt(url)
             if img_t:
                 nivel, count, hay_trafico = analizar_trafico(img_t)
                 with cols[i % 3]:
-                    st.image(img_t, caption=nombre_km)
-                    if nivel in ["Rojo", "Negro"]: st.markdown(f"🔴 **Tráfico:** {nivel}")
-                    elif nivel == "Naranja": st.markdown(f"🟠 **Tráfico:** {nivel}")
-                    elif nivel == "Amarillo": st.markdown(f"🟡 **Tráfico:** {nivel}")
-                    else: st.markdown(f"🟢 **Tráfico:** {nivel}")
+                    # Usamos un contenedor para forzar que el texto vaya estrictamente debajo
+                    with st.container():
+                        st.image(img_t, caption=nombre_km, use_container_width=True)
+                        
+                        if nivel in ["Rojo", "Negro"]: 
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(248, 113, 113, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #f87171;"><span style="color: #f87171; font-weight: bold;">🔴 Tráfico: Atasco Importante</span></div>', unsafe_allow_html=True)
+                        elif nivel == "Naranja": 
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(249, 115, 22, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #f97316;"><span style="color: #f97316; font-weight: bold;">🟠 Tráfico: Retenciones</span></div>', unsafe_allow_html=True)
+                        elif nivel == "Amarillo": 
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(250, 204, 21, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #facc15;"><span style="color: #facc15; font-weight: bold;">🟡 Tráfico: Denso</span></div>', unsafe_allow_html=True)
+                        else: 
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(74, 222, 128, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #4ade80;"><span style="color: #4ade80; font-weight: bold;">🟢 Tráfico: Fluido</span></div>', unsafe_allow_html=True)
                 i += 1
-    
+        
     # --- PESTAÑA LAS ROZAS ---
     with tab_rozas:
         mostrar_bloque_direccion(
@@ -295,31 +354,154 @@ with col_principal:
             },
             "ROZAS"
         )
-    with tab_eventos:
-        st.subheader("📅 Eventos Madrid (Hoy)")
-        st.caption("Fuente: Datos Abiertos del Ayuntamiento de Madrid")
-
-        eventos = obtener_eventos_reales_madrid()
-        
-        if not eventos:
-            st.write("✨ No hay grandes eventos reportados para hoy.")
-        else:
-            for ev in eventos:
-                # Color según impacto
-                color = "#f87171" if ev['impacto'] == "Alto" else "#fbbf24"
                 
-                st.markdown(f"""
-                <div style="background:#1e293b; padding:15px; border-radius:10px; border-left: 5px solid {color}; margin-bottom:10px;">
-                    <div style="display: flex; justify-content: space-between;">
-                        <span style="color:{color}; font-weight:bold; font-size:0.8em;">IMPACTO {ev['impacto'].upper()}</span>
-                        <span style="color:#94a3b8; font-size:0.8em;">🕒 {ev['hora']}</span>
-                    </div>
-                    <h5 style="margin:5px 0; color:white;">{ev['titulo']}</h5>
-                    <p style="margin:0; color:#cbd5e1; font-size:0.9em;">📍 {ev['lugar']}</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-        st.warning("👉 Los eventos en IFEMA y recintos del centro suelen complicar la A-6 unas 2 horas antes del inicio.")
-            
         st.markdown("---")
     st.caption("⚠️ **Aviso:** Este sistema de visión artificial puede cometer errores por deslumbramientos o baja visibilidad. Presta atención siempre a las imágenes de la carretera.")
+    # 1. EL CSS MÁGICO QUE OBLIGA A FLOTAR A LOS WIDGETS
+# =========================================================
+# BOTONES FLOTANTES (CALCULADORA Y SUGERENCIAS)
+# =========================================================
+
+# 1. CSS de Francotirador (Solo mueve nuestros botones)
+st.markdown("""
+<style>
+    /* Escondemos las marcas para que no se vean en la pantalla */
+    .marca-izq, .marca-der { display: none; }
+
+    /* Forzamos al elemento que va justo DESPUÉS de la marca izquierda a ir a la esquina */
+    div[data-testid="stVerticalBlock"] > div:has(.marca-izq) + div {
+        position: fixed !important;
+        bottom: 20px !important;
+        left: 20px !important;
+        z-index: 99999 !important;
+    }
+    /* Diseño del botón rectangular (Calculadora) */
+    div[data-testid="stVerticalBlock"] > div:has(.marca-izq) + div button {
+        border-radius: 10px !important;
+        background-color: #1e293b !important;
+        border: 2px solid #38bdf8 !important;
+        box-shadow: 0px 4px 15px rgba(0,0,0,0.5) !important;
+        font-weight: bold !important;
+    }
+
+    /* Forzamos al elemento que va justo DESPUÉS de la marca derecha a ir a la esquina */
+    div[data-testid="stVerticalBlock"] > div:has(.marca-der) + div {
+        position: fixed !important;
+        bottom: 20px !important;
+        right: 20px !important;
+        z-index: 99999 !important;
+    }
+    /* Diseño del botón circular (Asistente Sugerencias) */
+    div[data-testid="stVerticalBlock"] > div:has(.marca-der) + div button {
+        border-radius: 50% !important;
+        width: 65px !important;
+        height: 65px !important;
+        font-size: 30px !important;
+        background-color: #1e293b !important;
+        border: 2px solid #38bdf8 !important;
+        box-shadow: 0px 4px 15px rgba(0,0,0,0.5) !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# 2. BOTÓN IZQUIERDO (Calculadora Moderna)
+st.markdown('<span class="marca-izq"></span>', unsafe_allow_html=True)
+with st.popover("⏱️ Estimación de tu tiempo"):
+    
+    st.markdown("""
+    <style>
+        @keyframes bajaTitulo { 0% { opacity: 0; transform: translateY(-20px); } 100% { opacity: 1; transform: translateY(0); } }
+        @keyframes subeCont { 0% { opacity: 0; transform: translateY(20px); } 100% { opacity: 1; transform: translateY(0); } }
+        
+        .tit-anim { animation: bajaTitulo 0.5s ease-out forwards; color: #38bdf8; text-align: center; margin: 0 0 15px 0; font-size: 1.5em; font-weight: bold;}
+        .stSelectbox, div[data-testid="stMetric"] { animation: subeCont 0.6s ease-out forwards; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="tit-anim">Calculadora de Ruta</div>', unsafe_allow_html=True)
+    
+    # Diccionario con puntos kilométricos para poder calcular cualquier ruta
+    puntos = {
+        "Atocha / Centro (Madrid)": -5,
+        "Moncloa (Madrid)": 0,
+        "Ciudad Universitaria": 2,
+        "Aravaca (KM 10)": 10,
+        "Majadahonda (KM 14)": 14,
+        "Las Rozas (KM 18)": 18,
+        "Torrelodones (KM 29)": 29,
+        "Collado Villalba (KM 40)": 40,
+        "Guadarrama (KM 47)": 47
+    }
+    
+    lugares = list(puntos.keys())
+    
+    # Ahora el usuario puede elegir cualquier combinación (ida o vuelta)
+    origen = st.selectbox("📍 Origen:", lugares, index=7) # Villalba por defecto
+    destino = st.selectbox("🎯 Destino:", lugares, index=1) # Moncloa por defecto
+    
+    # LÓGICA REALISTA DE TIEMPOS
+    dist_total = abs(puntos[origen] - puntos[destino])
+    
+    if dist_total == 0:
+        st.warning("El origen y el destino son el mismo.")
+    else:
+        # Velocidades medias realistas ajustadas (Villalba-Moncloa sale a ~34 min en normal)
+        vel_normal = 70  # km/h con tráfico denso pero fluido
+        vel_vao = 100    # km/h carril despejado
+        
+        # Penalización de semáforos si se cruza el centro de Madrid
+        penalizacion_ciudad = 12 if ("Centro" in origen or "Centro" in destino) else 0
+        
+        # Cálculo: (Distancia / Velocidad) * 60 minutos
+        t_normal = int((dist_total / vel_normal) * 60) + penalizacion_ciudad
+        t_vao = int((dist_total / vel_vao) * 60) + penalizacion_ciudad
+        
+        ahorro = t_normal - t_vao
+        
+        # Corrección por si el viaje es muy corto
+        if ahorro < 0 or dist_total <= 5: 
+            t_vao = t_normal
+            ahorro = 0
+            
+        c1, c2 = st.columns(2)
+        with c1:
+            st.metric("🚗 Carril Normal", f"{t_normal} min")
+        with c2:
+            delta_color = "normal" if ahorro > 0 else "off"
+            st.metric("🚌 BUS-VAO", f"{t_vao} min", delta=f"-{ahorro} min" if ahorro > 0 else "0 min", delta_color=delta_color)
+# 3. BOTÓN DERECHO (Sugerencias circular)
+# 1. Inicializamos la "memoria" (Pon esto justo encima del botón derecho)
+if "sug_texto" not in st.session_state:
+    st.session_state.sug_texto = ""
+if "sug_enviada" not in st.session_state:
+    st.session_state.sug_enviada = False
+
+# 2. Función que se ejecuta al darle al botón
+def limpiar_y_enviar():
+    if st.session_state.sug_texto.strip() != "":
+        st.session_state.sug_enviada = True
+        st.session_state.sug_texto = "" # Esto es lo que vacía la caja
+
+# 3. BOTÓN DERECHO (Sugerencias)
+st.markdown('<span class="marca-der"></span>', unsafe_allow_html=True)
+with st.popover("👩🏻‍💼"):
+    st.write("### 💬 Sugerencias")
+    
+    # La caja de texto ahora está atada a la "memoria" con key="sug_texto"
+    st.text_area("Ayúdanos a mejorar la App:", key="sug_texto")
+    
+    # El botón llama a la función de arriba antes de recargar la página
+    st.button("Enviar", on_click=limpiar_y_enviar)
+    
+    # Mensaje de éxito con colores forzados para que se lea siempre
+    if st.session_state.sug_enviada:
+        st.markdown("""
+        <div style="background-color: #d1fae5; color: #065f46; padding: 10px; border-radius: 5px; font-weight: bold; text-align: center; margin-top: 10px;">
+            ✅ Sugerencia registrada. ¡Gracias!
+        </div>
+        """, unsafe_allow_html=True)

@@ -23,16 +23,16 @@ def analizar_trafico(imagen_pil):
         conteo = len([box for box in results[0].boxes if int(box.cls) in [2, 3, 5, 7]])
         
         # Umbrales ajustados al alza para absorber los coches del carril contrario
-        if conteo < 12: 
+        if conteo < 25: 
             nivel = "Verde"
-        elif conteo < 35: 
+        elif conteo < 50: 
             nivel = "Amarillo"
-        elif conteo < 45: 
+        elif conteo < 65: 
             nivel = "Naranja"
         else: 
             nivel = "Rojo"
         
-        hay_trafico = "SÍ" if conteo >= 35 else "NO"
+        hay_trafico = "SÍ" if conteo >= 50 else "NO"
         return nivel, conteo, hay_trafico
     except:
         return "Desconocido", 0, "No"
