@@ -68,29 +68,7 @@ def analizar_busvao_con_ia(_imagen_pil, tipo_panel): # <-- Añadimos el guion ba
         if "429" in str(e):
             return {"estado": "ERROR", "detalle": "Cuota agotada. Espera un poco."}
         return {"estado": "ERROR", "detalle": str(e)}
-    try:
-        # Seleccionamos el modelo
-        model = genai.GenerativeModel('gemini-3.1-flash-image-preview')
-
-        # Usamos el 'tipo_panel' para darle una instrucción más precisa a la IA
-        prompt = f"""
-        Analiza esta imagen de la A-6. Te estás centrando en el panel del BUS-VAO 
-        para la dirección: {tipo_panel}.
-        
-        Dime si el carril está ABIERTO para esa dirección, CERRADO, o si está 
-        abierto para la dirección CONTRARIA.
-        
-        Responde SOLO con una de estas opciones: 'MADRID', 'LAS ROZAS', 'CERRADO'.
-        """
-
-        # Le pasamos la imagen (que ya es un objeto PIL) y el prompt
-        resultado = model.generate_content([prompt, _imagen_pil])
-        
-        return resultado.text.strip().upper()
-
-    except Exception as e:
-        return f"ERROR_IA: {str(e)}"    
-
+   
 # --- PRUEBA RÁPIDA ---
 # Cámara del km 7.5 de la A-6 (Puente de San Fernando)
 url_ejemplo = "https://infocar.dgt.es/idioma/es/camaras/madrid/camara.do?id=128" 

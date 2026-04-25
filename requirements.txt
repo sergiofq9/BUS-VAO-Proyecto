@@ -1,7 +1,7 @@
 streamlit
 requests
 Pillow
-pandas
 ultralytics
 google-generativeai
 opencv-python-headless
+numpy
