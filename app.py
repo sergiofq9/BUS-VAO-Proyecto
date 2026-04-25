@@ -1,5 +1,8 @@
 import streamlit as st
+import xml.etree.ElementTree as ET
 import requests
+import re
+import html
 from PIL import Image
 from io import BytesIO
 from src.dgt_utils import descargar_foto_dgt
@@ -9,22 +12,92 @@ from src.processor import analizar_trafico, analizar_panel_automatico
  
 st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_state="expanded")
 
-@st.cache_data(ttl=3600)
+
+def obtener_gasolineras_a6(tipo_combustible):
+    url = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/FiltroProvincia/28"
+    try:
+        # Algunos servidores rechazan peticiones si no pareces un navegador, le ponemos este "disfraz"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(url, headers=headers, timeout=10)
+        datos = res.json().get('ListaEESSPrecio', [])
+        
+        hacia_madrid = []
+        hacia_rozas = []
+
+        # Elegimos la columna de la API según lo que marque el usuario
+        clave_precio = 'Precio Gasolina 95 E5' if tipo_combustible == "Gasolina 95" else 'Precio Gasoleo A'
+
+        for g in datos:
+            # Limpieza extrema: quitamos espacios invisibles y ponemos todo en mayúsculas
+            municipio = g.get('Municipio', '').strip().upper()
+            precio_str = g.get(clave_precio, "").replace(',', '.').strip()
+            
+            # Si no hay precio, saltamos esta gasolinera
+            if not precio_str: continue 
+            
+            try:
+                precio = float(precio_str)
+            except ValueError:
+                continue # Por si la API devuelve letras en vez de números
+            
+            # Ponemos los textos en formato bonito (ej: "Madrid" en vez de "MADRID")
+            info = {
+                "rotulo": g.get('Rótulo', 'Gasolinera').title(),
+                "precio": precio,
+                "direccion": g.get('Dirección', '').title(),
+                "municipio": municipio.title()
+            }
+
+            # Filtros mucho más flexibles (busca si la palabra está dentro del nombre)
+            if municipio == "MADRID" or "POZUELO" in municipio:
+                hacia_madrid.append(info)
+            elif "ROZAS" in municipio or "MAJADAHONDA" in municipio or "TORRELODONES" in municipio:
+                hacia_rozas.append(info)
+
+        # Ordenamos por precio y cogemos solo el TOP 2
+        hacia_madrid = sorted(hacia_madrid, key=lambda x: x['precio'])[:2]
+        hacia_rozas = sorted(hacia_rozas, key=lambda x: x['precio'])[:2]
+
+        return hacia_madrid, hacia_rozas
+    except Exception as e:
+        return [], []
+
+# @st.cache_data(ttl=3600)
 def obtener_eventos_reales_madrid():
     try:
         url = "https://datos.madrid.es/egob/catalogo/206974-0-agenda-eventos-culturales-100.json"
         res = requests.get(url, timeout=10)
         datos = res.json()
         
-        eventos_hoy = []
-        # Filtros mucho más estrictos (evitamos atrapar teatros de barrio)
-        recintos_rojo = ["wizink", "bernabéu", "bernabeu", "metropolitano", "madrid arena", "caja mágica"]
-        recintos_amarillo = ["ifema", "palacio de deportes", "auditorio nacional", "teatro real", "recinto ferial"]
+        lista_eventos = datos.get('@graph', [])
         
-        for item in datos.get('@graph', []):
+        # EL CHIVATO: Nos dirá cuántos eventos ha encontrado en total en Madrid
+        st.toast(f"🎭 API Ayuntamiento: {len(lista_eventos)} eventos descargados", icon="✅")
+        
+        eventos_hoy = []
+        recintos_rojo = ["wizink", "bernabéu", "bernabeu", "metropolitano", "madrid arena", "caja mágica"]
+        recintos_amarillo = ["ifema", "palacio de deportes", "auditorio nacional", "teatro real", "vistalegre", "palacio de congresos"]
+        
+        for item in lista_eventos:
             titulo = item.get('title', '').lower()
-            lugar = item.get('address', {}).get('area', {}).get('street-address', 'Madrid').lower()
-            hora = item.get('dtstart', '').split('T')[-1][:5]
+            
+            # Buscamos en el nombre del recinto
+            lugar = item.get('event-location', '').lower()
+            if not lugar:
+                lugar = item.get('organization', {}).get('organization-name', '').lower()
+            
+            # --- AQUÍ VA TU NUEVO CÓDIGO DE LA HORA ---
+            dtstart = item.get('dtstart', '')
+            if ' ' in dtstart:
+                hora = dtstart.split(' ')[1][:5]
+            elif 'T' in dtstart:
+                hora = dtstart.split('T')[1][:5]
+            else:
+                hora = "Todo el día"
+            
+            if hora == "00:00":
+                hora = "Todo el día"
+            # ------------------------------------------
             
             impacto = "Bajo"
             
@@ -39,49 +112,58 @@ def obtener_eventos_reales_madrid():
                         impacto = "Medio"
                         break
             
-            # 🚨 LA CLAVE: Solo guardamos los eventos masivos, descartamos los locales (Bajo)
+            # Solo guardamos los masivos (Alto o Medio)
             if impacto in ["Alto", "Medio"]:
                 eventos_hoy.append({
                     "titulo": item.get('title', ''), 
-                    "lugar": item.get('address', {}).get('area', {}).get('street-address', 'Madrid'),
+                    "lugar": item.get('event-location', 'Madrid'),
                     "hora": hora,
                     "impacto": impacto
                 })
-            
-        return eventos_hoy[:5] # Máximo 5 para no hacer una lista kilométrica
-    except:
+        
+        return eventos_hoy[:5]
+    except Exception as e:
+        st.error(f"Error eventos: {e}")
         return []
 
-@st.cache_data(ttl=300) # Se actualiza cada 5 minutos
+
+
+@st.cache_data(ttl=300) # Ahora sí, sin problemas
 def obtener_incidencias_a6():
     try:
-        # Fuente oficial: Punto de Acceso Nacional de Información de Tráfico
-        url = "https://www.dgt.es/estaticos/movilidad/incidencias-movilidad.json"
-        res = requests.get(url, timeout=10).json()
-        incidencias = res.get('incidencias', [])
+        url = "https://infocar.dgt.es/etraffic/Incidencias?ca=13&provIci=28&caracter=acontecimiento"
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        
+        res = requests.get(url, headers=headers, timeout=10)
+        res.raise_for_status()
+        
+        html_content = res.text
+        filas = re.findall(r'<tr.*?>(.*?)</tr>', html_content, re.DOTALL | re.IGNORECASE)
         
         avisos = []
-        for inc in incidencias:
-            # Filtramos solo la A-6 en Madrid
-            if inc.get('carretera') == 'A-6' and inc.get('provincia') == 'MADRID':
-                tipo = inc.get('tipo', 'AVISO')
-                descripcion = inc.get('descripcion', 'Sin detalles')
-                pk_ini = inc.get('pk_ini', '?')
-                pk_fin = inc.get('pk_fin', '?')
+        for fila in filas:
+            if "A-6" in fila.upper():
+                texto_limpio = re.sub(r'<[^>]+>', ' ', fila)
+                texto_limpio = re.sub(r'\s+', ' ', texto_limpio).strip()
                 
-                # Asignamos un emoji según el tipo
                 emoji = "⚠️"
-                if "ACCIDENTE" in tipo.upper(): emoji = "💥"
-                elif "OBRAS" in tipo.upper(): emoji = "🚧"
-                elif "METEOROL" in tipo.upper(): emoji = "❄️"
+                texto_upper = texto_limpio.upper()
+                if "ACCIDENTE" in texto_upper: emoji = "💥"
+                elif "OBRA" in texto_upper: emoji = "🚧"
+                elif "RETENCI" in texto_upper or "CONGESTI" in texto_upper: emoji = "🚗"
+                elif "METEOROL" in texto_upper or "NIEVE" in texto_upper: emoji = "❄️"
                 
                 avisos.append({
                     "icono": emoji,
-                    "titulo": tipo,
-                    "info": f"KM {pk_ini} al {pk_fin}: {descripcion}"
+                    "titulo": "Aviso A-6",
+                    "info": texto_limpio
                 })
+                
+        # Hemos borrado el st.toast() de aquí
         return avisos
-    except:
+    
+    except Exception as e:
+        # Hemos borrado el st.error() de aquí para que falle en silencio
         return []
 
 @st.cache_data(ttl=900) # Ahora se actualiza cada 15 minutos
@@ -148,6 +230,16 @@ st.markdown("""
 # --- BARRA LATERAL (SIDEBAR) ---
 col_lateral, col_principal = st.columns([1, 3], gap="large")
 with col_lateral:
+    # --- CSS PARA FORZAR EL FONDO OSCURO EN TODOS LOS CONTENEDORES ---
+    st.markdown("""
+        <style>
+        [data-testid="stSidebar"] div[data-testid="stVerticalBlockBorderWrapper"] {
+            background-color: #1a202c !important; /* El color de fondo de tu meteorología */
+            border: 1px solid #334155 !important;
+            border-radius: 10px !important;
+        }
+        </style>
+    """, unsafe_allow_html=True)
 
     st.markdown("  ")
     st.markdown("  ")
@@ -173,8 +265,56 @@ with col_lateral:
     {alerta_html}
 </div>
 """, unsafe_allow_html=True)
+    
+
+    # --- WIDGET DE GASOLINERAS EN EL LATERAL ---
+    with st.container(border=True):
+        st.markdown("<h4 style='background:#1e293b; padding:20px; border-radius:15px; border:1px solid #334155; margin-bottom: 15px'>⛽ Precios en ruta (A-6)</h4>", unsafe_allow_html=True)
         
-    st.markdown("<br>", unsafe_allow_html=True)
+        # El selector dentro del contenedor
+        tipo_comb = st.selectbox("Selecciona tu carburante:", ["Diésel", "Gasolina 95"], label_visibility="collapsed", key="selector_gasofa_definitivo")
+        
+        # Llamada a la función
+        gas_madrid, gas_rozas = obtener_gasolineras_a6(tipo_comb)
+        
+        # Tus tarjetas de colores originales (Asegúrate de que este 'def' está indentado AQUÍ)
+        def sidebar_card(datos, color_hex, color_rgba):
+            for g in datos:
+                precio_fmt = f"{g['precio']:.3f} €"
+                st.markdown(f"""
+                    <div style="
+                        background: linear-gradient(90deg, {color_rgba} 0%, rgba(0,0,0,0) 100%);
+                        border-left: 4px solid {color_hex};
+                        border-radius: 6px;
+                        padding: 10px 12px;
+                        margin-bottom: 10px;
+                    ">
+                        <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px;">
+                            <div style="font-weight: 700; color: #f8fafc; font-size: 0.85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 65%;">
+                                {g['rotulo']}
+                            </div>
+                            <div style="font-weight: 800; color: {color_hex}; font-size: 1rem;">
+                                {precio_fmt}
+                            </div>
+                        </div>
+                        <div style="color: #94a3b8; font-size: 0.75rem; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;">
+                            <strong style="color: #cbd5e1;">{g['municipio']}</strong> &bull; {g['direccion']}
+                        </div>
+                    </div>
+                """, unsafe_allow_html=True)
+
+        # Resto del contenido también indentado dentro del contenedor
+        st.markdown("<div style='margin-top: 10px; margin-bottom: 10px; font-weight: bold; color: #cbd5e1; font-size: 0.9rem;'>🏙️ Dir. Madrid</div>", unsafe_allow_html=True)
+        if gas_madrid:
+            sidebar_card(gas_madrid, "#4ade80", "rgba(74, 222, 128, 0.15)")
+        else:
+            st.caption("Sin datos en esta zona.")
+            
+        st.markdown("<div style='margin-top: 10px; margin-bottom: 10px; font-weight: bold; color: #cbd5e1; font-size: 0.9rem;'>🏡 Dir. Las Rozas</div>", unsafe_allow_html=True)
+        if gas_rozas:
+            sidebar_card(gas_rozas, "#38bdf8", "rgba(56, 189, 248, 0.15)")
+        else:
+            st.caption("Sin datos en esta zona.")
     
     incidencias_reales = obtener_incidencias_a6()
     
@@ -216,14 +356,6 @@ with col_lateral:
         Calzada reversible en la A-6 reservada para autobuses, motos, vehículos con 2 o más ocupantes y etiqueta CERO emisiones (cuando lo indique el cartel luminoso en las entradas).
     </p>
     <hr style="border-color: #334155; margin: 15px 0;">
-    <h4 style="color: #38bdf8; margin-bottom: 10px;">🚥 Tráfico</h4>
-    <div style="background-color: #0f172a; padding: 10px; border-radius: 8px;">
-        <span style="color: #4ade80;">🟢 Fluido</span><br>
-        <span style="color: #facc15;">🟡 Denso</span><br>
-        <span style="color: #ffa500;">🟠 Retenciones</span><br>
-        <span style="color: #f87171;">🔴 Atasco Importante</span><br>
-    </div>
-    <hr style="border-color: #334155; margin: 15px 0;">
     <h4 style="color: #38bdf8; margin-bottom: 10px;">⏱️ Horarios (L-V)</h4>
     <div style="background-color: #0f172a; padding: 10px; border-radius: 8px; font-size: 0.9em;">
         <p style="margin: 0; color: #f8fafc;">➡️ <b>Hacia Madrid:</b><br><span style="color: #94a3b8;">06:00h - 11:30h</span></p>
@@ -232,6 +364,7 @@ with col_lateral:
     </div>
 </div>
 """, unsafe_allow_html=True)
+    
 with col_principal:
  
     st.title("Información A-6: Madrid - Las Rozas")
@@ -505,3 +638,4 @@ with st.popover("👩🏻‍💼"):
             ✅ Sugerencia registrada. ¡Gracias!
         </div>
         """, unsafe_allow_html=True)
+    st.write("---")

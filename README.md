@@ -13,6 +13,7 @@ Este proyecto es una aplicación web desarrollada con Streamlit que proporciona 
 - **Incidencias de tráfico**: Avisos oficiales de la DGT sobre accidentes, obras y eventos en la A-6.
 - **Eventos en Madrid**: Lista de eventos culturales del día con clasificación de impacto en el tráfico.
 - **Cierre nocturno automático**: El carril se considera cerrado entre las 22:00 y las 06:00 horas.
+- **Precios de carburantes**: Información en tiempo real de las gasolineras más baratas en la ruta A-6, con precios de Gasolina 95 y Diésel.
 
 ## Características
 
@@ -25,6 +26,7 @@ Este proyecto es una aplicación web desarrollada con Streamlit que proporciona 
 - **Incidencias de tráfico**: Avisos oficiales de la DGT sobre eventos en la A-6.
 - **Eventos culturales**: Lista de eventos en Madrid con impacto potencial en el tráfico.
 - **Modo nocturno**: Cierre automático del carril entre las 22:00 y 06:00 horas.
+- **Precios de carburantes**: Consulta los precios más bajos de combustible en gasolineras cercanas a la A-6.
 
 ## Instalación
 
@@ -77,11 +79,12 @@ La aplicación se abrirá en tu navegador predeterminado en `http://localhost:85
 
 - **Pestaña Dirección Madrid**: Muestra el estado del carril VAO hacia Madrid
 - **Pestaña Dirección Las Rozas**: Muestra el estado del carril VAO hacia Las Rozas
-- **Pestaña Eventos en Madrid**: Lista de eventos culturales del día con clasificación de impacto
+- **Eventos en Madrid**: Expansible con lista de eventos culturales del día con clasificación de impacto
 - **Botón Actualizar**: Refresca las imágenes y análisis
 - **Indicadores de estado**: Verde (abierto), Rojo (cerrado), Amarillo (desconocido)
 - **Información meteorológica**: Clima en tiempo real para Las Rozas y Madrid
 - **Avisos DGT**: Incidencias oficiales en la A-6
+- **Precios de carburantes**: Selector en la barra lateral para ver los precios más bajos de Gasolina 95 o Diésel en ambas direcciones
 
 ## Estructura del proyecto
 
