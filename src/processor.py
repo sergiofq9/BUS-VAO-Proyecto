@@ -1,3 +1,4 @@
+import google.generativeai as genai
 import streamlit as st
 from ultralytics import YOLO
 import json
@@ -36,38 +37,61 @@ def analizar_trafico(imagen_pil):
         return nivel, conteo, hay_trafico
     except:
         return "Desconocido", 0, "No"
+    
+llave = st.secrets["GEMINI_API_KEY"]
 
-def analizar_panel_automatico(imagen_pil, tipo_panel="VETERINARIA"):
+# 1. Configura tu llave
+genai.configure(api_key=llave)
+
+@st.cache_data(ttl=600) 
+def analizar_busvao_con_ia(_imagen_pil, tipo_panel): # <-- Añadimos el guion bajo aquí
     try:
-        # --- EL PARCHE: LÓGICA DE HORARIO ---
-        hora_actual = datetime.datetime.now().hour
-        # Si son las 22, 23, 0, 1, 2, 3, 4 o 5, el VAO está cerrado.
-        if hora_actual >= 22 or hora_actual < 6:
-            return {"estado": "CERRADO", "bus": False, "motos": False, "mas2": False, "cero": False}
-        # ------------------------------------
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
-        # Si estamos en horario de apertura, entonces sí, miramos la foto
-        img = cv2.cvtColor(np.array(imagen_pil), cv2.COLOR_RGB2BGR)
-        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-        alto, ancho = img.shape[:2]
+        prompt = f"""
+        Analiza el panel del BUS-VAO para la dirección: {tipo_panel}.
+        Responde SOLO una palabra: 'ABIERTO', 'CERRADO' o 'DESCONOCIDO'.
+        """
 
-        if tipo_panel == "VETERINARIA":
-            panel_hsv = hsv[int(alto*0.28):int(alto*0.42), int(ancho*0.40):int(ancho*0.60)]
-            m_roja = cv2.inRange(panel_hsv, np.array([0, 100, 150]), np.array([10, 255, 255]))
-            m_verde = cv2.inRange(panel_hsv, np.array([40, 70, 120]), np.array([90, 255, 255]))
-            m_azul = cv2.inRange(panel_hsv, np.array([90, 100, 130]), np.array([140, 255, 255]))
-            
-            if cv2.countNonZero(m_verde) > 10: return {"estado": "ABIERTO", "bus": True, "motos": True, "mas2": True, "cero": True}
-            if cv2.countNonZero(m_roja) > 10: return {"estado": "CERRADO", "bus": False, "motos": False, "mas2": False, "cero": False}
-            if cv2.countNonZero(m_azul) > 10: return {"estado": "ABIERTO", "bus": True, "motos": True, "mas2": True, "cero": True}
-        else:
-            panel_hsv = hsv[int(alto*0.10):int(alto*0.45), int(ancho*0.15):int(ancho*0.85)]
-            m_roja = cv2.inRange(panel_hsv, np.array([0, 100, 130]), np.array([10, 255, 255]))
-            m_azul = cv2.inRange(panel_hsv, np.array([90, 100, 130]), np.array([140, 255, 255]))
-            
-            if cv2.countNonZero(m_roja) > 15: return {"estado": "CERRADO", "bus": False, "motos": False, "mas2": False, "cero": False}
-            if cv2.countNonZero(m_azul) > 15: return {"estado": "ABIERTO", "bus": True, "motos": True, "mas2": True, "cero": True}
+        # Usamos el nombre con el guion bajo dentro también
+        resultado = model.generate_content([prompt, _imagen_pil])
+        
+        respuesta_texto = resultado.text.strip().upper()
+        
+        # Simplificamos la respuesta para tu app.py
+        estado_final = "ABIERTO" if "ABIERTO" in respuesta_texto else "CERRADO"
+        if "DESCONOCIDO" in respuesta_texto: estado_final = "DESCONOCIDO"
+        
+        return {"estado": estado_final}
 
-        return {"estado": "DESCONOCIDO", "bus": False, "motos": False, "mas2": False, "cero": False}
-    except:
-        return {"estado": "ERROR", "bus": False, "motos": False, "mas2": False, "cero": False}
+    except Exception as e:
+        if "429" in str(e):
+            return {"estado": "ERROR", "detalle": "Cuota agotada. Espera un poco."}
+        return {"estado": "ERROR", "detalle": str(e)}
+    try:
+        # Seleccionamos el modelo
+        model = genai.GenerativeModel('gemini-3.1-flash-image-preview')
+
+        # Usamos el 'tipo_panel' para darle una instrucción más precisa a la IA
+        prompt = f"""
+        Analiza esta imagen de la A-6. Te estás centrando en el panel del BUS-VAO 
+        para la dirección: {tipo_panel}.
+        
+        Dime si el carril está ABIERTO para esa dirección, CERRADO, o si está 
+        abierto para la dirección CONTRARIA.
+        
+        Responde SOLO con una de estas opciones: 'MADRID', 'LAS ROZAS', 'CERRADO'.
+        """
+
+        # Le pasamos la imagen (que ya es un objeto PIL) y el prompt
+        resultado = model.generate_content([prompt, _imagen_pil])
+        
+        return resultado.text.strip().upper()
+
+    except Exception as e:
+        return f"ERROR_IA: {str(e)}"    
+
+# --- PRUEBA RÁPIDA ---
+# Cámara del km 7.5 de la A-6 (Puente de San Fernando)
+url_ejemplo = "https://infocar.dgt.es/idioma/es/camaras/madrid/camara.do?id=128" 
+# Nota: Tendrás que buscar la URL directa del .jpg de la cámara

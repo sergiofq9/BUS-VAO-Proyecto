@@ -14,11 +14,12 @@ Este proyecto es una aplicación web desarrollada con Streamlit que proporciona 
 - **Eventos en Madrid**: Lista de eventos culturales del día con clasificación de impacto en el tráfico.
 - **Cierre nocturno automático**: El carril se considera cerrado entre las 22:00 y las 06:00 horas.
 - **Precios de carburantes**: Información en tiempo real de las gasolineras más baratas en la ruta A-6, con precios de Gasolina 95 y Diésel.
+- **Análisis con IA generativa**: Uso de Google Gemini para detectar automáticamente el estado del panel BUS-VAO.
 
 ## Características
 
 - **Monitoreo en tiempo real**: Actualización automática de imágenes desde cámaras DGT.
-- **Análisis de visión artificial**: Detección automática del estado del panel indicador.
+- **Análisis con IA generativa**: Detección automática del estado del panel indicador usando Google Gemini.
 - **Conteo de vehículos**: Análisis de densidad de tráfico usando YOLOv8.
 - **Interfaz intuitiva**: Diseño moderno con pestañas para ambas direcciones.
 - **Información horaria**: Horarios de funcionamiento del BUS-VAO.
@@ -63,7 +64,14 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-5. Descarga el modelo YOLOv8 (incluido en el repositorio como `yolov8n.pt`)
+5. Configura la clave API de Google Gemini:
+   - Obtén una clave API de [Google AI Studio](https://makersuite.google.com/app/apikey).
+   - Crea un archivo `.streamlit/secrets.toml` en el directorio del proyecto con:
+     ```
+     GEMINI_API_KEY = "tu_clave_aqui"
+     ```
+
+6. Descarga el modelo YOLOv8 (incluido en el repositorio como `yolov8n.pt`)
 
 ## Uso
 

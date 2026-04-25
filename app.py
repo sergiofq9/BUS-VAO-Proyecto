@@ -8,7 +8,7 @@ from io import BytesIO
 from src.dgt_utils import descargar_foto_dgt
 import time
 import requests
-from src.processor import analizar_trafico, analizar_panel_automatico
+from src.processor import analizar_trafico, analizar_busvao_con_ia
  
 st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_state="expanded")
 
@@ -390,25 +390,27 @@ with col_principal:
     
     
     def mostrar_bloque_direccion(cam_panel, diccionario_cams_trafico, tipo_panel="VETERINARIA"):
-    # Título limpio
+        # Título limpio
         st.subheader("🔳 Estado del Carril BUS-VAO")
-                    
+        
         img_p = descargar_foto_dgt(cam_panel)
+        
         if img_p:
             c1, c2 = st.columns([2, 1])
             
             with c1: 
-                # 1. ARREGLO DEL WARNING: Usamos el comando moderno que pide Streamlit
                 st.image(img_p, use_container_width=True)
             
             with c2:
-                # 2. BAJAR EL BLOQUE: Metemos unos espacios invisibles para empujar hacia abajo
                 st.write("")
+                data = analizar_busvao_con_ia(img_p, tipo_panel)
                 
-                data = analizar_panel_automatico(img_p, tipo_panel)
                 if data['estado'] == "ABIERTO": st.success(f"🟢 {data['estado']}")
                 elif data['estado'] == "CERRADO": st.error(f"🔴 {data['estado']}")
                 else: st.warning(f"⚠️ {data['estado']}")
+                
+                if data['estado'] == "ERROR":
+                    st.error(f"Fallo de la IA: {data.get('detalle', 'Error desconocido')}")
                 
                 st.write("---")
                 
@@ -435,30 +437,34 @@ with col_principal:
                     with st.spinner("🔄 Cargando..."):
                         time.sleep(1)
                         st.rerun()    
-            st.markdown("---")
-            st.subheader("🚥 Niveles de Tráfico")
-            
-            cols = st.columns(3)
+    
+        # --- ESTO ES LO QUE HEMOS MOVIDO FUERA DEL 'IF' ---
+        st.markdown("---")
+        st.subheader("🚥 Niveles de Tráfico")
+        
+        # Definimos 'cols' AQUÍ para que siempre existan
+        cols = st.columns(3)
         i = 0
+        
         for nombre_km, url in diccionario_cams_trafico.items():
             img_t = descargar_foto_dgt(url)
             if img_t:
                 nivel, count, hay_trafico = analizar_trafico(img_t)
+                # Ahora cols[i % 3] nunca fallará
                 with cols[i % 3]:
-                    # Usamos un contenedor para forzar que el texto vaya estrictamente debajo
                     with st.container():
                         st.image(img_t, caption=nombre_km, use_container_width=True)
                         
                         if nivel in ["Rojo", "Negro"]: 
-                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(248, 113, 113, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #f87171;"><span style="color: #f87171; font-weight: bold;">🔴 Tráfico: Atasco Importante</span></div>', unsafe_allow_html=True)
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; background-color: rgba(248, 113, 113, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #f87171;"><span style="color: #f87171; font-weight: bold;">🔴 Tráfico: Atasco</span></div>', unsafe_allow_html=True)
                         elif nivel == "Naranja": 
-                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(249, 115, 22, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #f97316;"><span style="color: #f97316; font-weight: bold;">🟠 Tráfico: Retenciones</span></div>', unsafe_allow_html=True)
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; background-color: rgba(249, 115, 22, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #f97316;"><span style="color: #f97316; font-weight: bold;">🟠 Tráfico: Retenciones</span></div>', unsafe_allow_html=True)
                         elif nivel == "Amarillo": 
-                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(250, 204, 21, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #facc15;"><span style="color: #facc15; font-weight: bold;">🟡 Tráfico: Denso</span></div>', unsafe_allow_html=True)
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; background-color: rgba(250, 204, 21, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #facc15;"><span style="color: #facc15; font-weight: bold;">🟡 Tráfico: Denso</span></div>', unsafe_allow_html=True)
                         else: 
-                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; position: relative; z-index: 2; background-color: rgba(74, 222, 128, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #4ade80;"><span style="color: #4ade80; font-weight: bold;">🟢 Tráfico: Fluido</span></div>', unsafe_allow_html=True)
+                            st.markdown('<div style="margin-top: -15px; margin-bottom: 30px; background-color: rgba(74, 222, 128, 0.15); padding: 8px; border-radius: 6px; border-left: 4px solid #4ade80;"><span style="color: #4ade80; font-weight: bold;">🟢 Tráfico: Fluido</span></div>', unsafe_allow_html=True)
                 i += 1
-        
+            
     # --- PESTAÑA LAS ROZAS ---
     with tab_rozas:
         mostrar_bloque_direccion(
