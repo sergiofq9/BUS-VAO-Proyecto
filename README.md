@@ -34,7 +34,7 @@ Este proyecto es una aplicación web desarrollada con Streamlit que proporciona 
 ### Prerrequisitos
 
 - Python 3.11 o superior
-- Entorno virtual (recomendado)
+- uv (https://github.com/astral-sh/uv) para gestión de entornos virtuales y dependencias
 
 ### Pasos de instalación
 
@@ -44,9 +44,9 @@ git clone <url-del-repositorio>
 cd bus-vao-proyecto
 ```
 
-2. Crea un entorno virtual:
+2. Crea un entorno virtual con uv:
 ```bash
-python -m venv .venv
+uv venv
 ```
 
 3. Activa el entorno virtual:
@@ -59,9 +59,9 @@ python -m venv .venv
    source .venv/bin/activate
    ```
 
-4. Instala las dependencias:
+4. Instala las dependencias con uv:
 ```bash
-pip install -r requirements.txt
+uv pip install -r requirements.txt
 ```
 
 5. Configura la clave API de Google Gemini:
