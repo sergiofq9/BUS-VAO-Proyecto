@@ -12,57 +12,92 @@ from src.processor import analizar_trafico, analizar_busvao_con_ia
  
 st.set_page_config(page_title="BUS-VAO A-6", layout="wide", initial_sidebar_state="expanded")
 
-
+@st.cache_data(ttl=3600)
 def obtener_gasolineras_a6(tipo_combustible):
-    url = "https://sedeaplicaciones.minetur.gob.es/ServiciosRESTCarburantes/PreciosCarburantes/EstacionesTerrestres/FiltroProvincia/28"
+    url = "https://energia.serviciosmin.gob.es/ServiciosRestCarburantes/PreciosCarburantes/EstacionesTerrestres/FiltroProvincia/28"
+    
     try:
-        # Algunos servidores rechazan peticiones si no pareces un navegador, le ponemos este "disfraz"
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(url, headers=headers, timeout=10)
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+        }
+        res = requests.get(url, headers=headers, timeout=15)
+        res.raise_for_status() 
+        
         datos = res.json().get('ListaEESSPrecio', [])
         
         hacia_madrid = []
         hacia_rozas = []
 
-        # Elegimos la columna de la API según lo que marque el usuario
-        clave_precio = 'Precio Gasolina 95 E5' if tipo_combustible == "Gasolina 95" else 'Precio Gasoleo A'
+        clave_precio = 'Precio Gasolina 95 E5' if "Gasolina" in tipo_combustible else 'Precio Gasoleo A'
+
+        # 🛑 LA FRONTERA: Solo aceptamos estos municipios. ¡Adiós Villalba!
+        municipios_permitidos = ["MADRID", "LAS ROZAS DE MADRID", "MAJADAHONDA", "POZUELO DE ALARCON"]
 
         for g in datos:
-            # Limpieza extrema: quitamos espacios invisibles y ponemos todo en mayúsculas
             municipio = g.get('Municipio', '').strip().upper()
+            
+            # Si el municipio no está en nuestra lista VIP, saltamos a la siguiente gasolinera
+            if municipio not in municipios_permitidos:
+                continue
+
+            direccion = g.get('Dirección', '').upper()
+            margen = g.get('Margen', '').upper()
+            
             precio_str = g.get(clave_precio, "").replace(',', '.').strip()
             
-            # Si no hay precio, saltamos esta gasolinera
             if not precio_str: continue 
             
             try:
                 precio = float(precio_str)
             except ValueError:
-                continue # Por si la API devuelve letras en vez de números
+                continue 
             
-            # Ponemos los textos en formato bonito (ej: "Madrid" en vez de "MADRID")
             info = {
                 "rotulo": g.get('Rótulo', 'Gasolinera').title(),
                 "precio": precio,
-                "direccion": g.get('Dirección', '').title(),
+                "direccion": direccion.title(),
                 "municipio": municipio.title()
             }
 
-            # Filtros mucho más flexibles (busca si la palabra está dentro del nombre)
-            if municipio == "MADRID" or "POZUELO" in municipio:
-                hacia_madrid.append(info)
-            elif "ROZAS" in municipio or "MAJADAHONDA" in municipio or "TORRELODONES" in municipio:
-                hacia_rozas.append(info)
+           # Añadimos más posibles formas en las que el Ministerio haya escrito la carretera
+            
+            # 1. Limpiamos la dirección
+            dir_palabras = direccion.replace(',', ' ').replace('.', ' ').split()
+            
+            # 2. Búsqueda EXACTA (Sin letras ni números sueltos)
+            tiene_etiqueta = any(p in dir_palabras for p in ["A-6", "A6", "N-VI", "NVI"])
+            
+            # 3. Búsqueda por nombres clave de ese tramo (QUITAMOS EL "A 6" TRAMPOSO)
+            tiene_nombre = any(kw in direccion for kw in ["CORUÑA", "PERDICES", "PLANTIO", "HIPODROMO"])
+            
+            # 4. LISTA NEGRA: Barrios o calles que se nos cuelan por error
+            es_falsa_alarma = any(bad in direccion for bad in ["DEMOCRACIA", "SURESTE", "VALLECAS"])
+            
+            # Si tiene la etiqueta o el nombre, y NO es una falsa alarma, la aceptamos
+            es_ruta_a6 = (tiene_etiqueta or tiene_nombre) and not es_falsa_alarma
 
-        # Ordenamos por precio y cogemos solo el TOP 2
+            if es_ruta_a6:
+                if margen == 'I':
+                    hacia_madrid.append(info)
+                elif margen == 'D':
+                    hacia_rozas.append(info)
+                else:
+                    if municipio == "MADRID" or "POZUELO DE ALARCON" in municipio:
+                        hacia_madrid.append(info)
+                    else:
+                        hacia_rozas.append(info)
+
         hacia_madrid = sorted(hacia_madrid, key=lambda x: x['precio'])[:2]
         hacia_rozas = sorted(hacia_rozas, key=lambda x: x['precio'])[:2]
 
         return hacia_madrid, hacia_rozas
+
     except Exception as e:
+        print(f"⚠️ Error al cargar gasolineras: {e}")
         return [], []
 
-# @st.cache_data(ttl=3600)
+@st.cache_data(ttl=3600)
 def obtener_eventos_reales_madrid():
     try:
         url = "https://datos.madrid.es/egob/catalogo/206974-0-agenda-eventos-culturales-100.json"
@@ -71,8 +106,8 @@ def obtener_eventos_reales_madrid():
         
         lista_eventos = datos.get('@graph', [])
         
-        # EL CHIVATO: Nos dirá cuántos eventos ha encontrado en total en Madrid
-        st.toast(f"🎭 API Ayuntamiento: {len(lista_eventos)} eventos descargados", icon="✅")
+        # EL CHIVATO: Lo cambiamos a print para no romper la web
+        print(f"🎭 API Ayuntamiento: {len(lista_eventos)} eventos descargados")
         
         eventos_hoy = []
         recintos_rojo = ["wizink", "bernabéu", "bernabeu", "metropolitano", "madrid arena", "caja mágica"]
@@ -123,9 +158,8 @@ def obtener_eventos_reales_madrid():
         
         return eventos_hoy[:5]
     except Exception as e:
-        st.error(f"Error eventos: {e}")
+        print(f"⚠️ Fallo al cargar eventos: {e}") 
         return []
-
 
 
 @st.cache_data(ttl=300) # Ahora sí, sin problemas
@@ -369,18 +403,14 @@ with col_principal:
  
     st.title("Información A-6: Madrid - Las Rozas")
 
-    # --- ALERTA GLOBAL DE EVENTOS (Desplegable) ---
     eventos = obtener_eventos_reales_madrid()
 
-    if eventos:
-        # Si hay eventos, sale un recuadro que se puede desplegar
-        with st.expander(f"📅 Atención: Hay {len(eventos)} eventos hoy en Madrid que pueden afectar al tráfico"):
-            for ev in eventos:
-                es_alto = "🔴" if ev['impacto'] == "Alto" else "🟡"
-                st.markdown(f"{es_alto} **{ev['hora']} | {ev['titulo']}** 📍 *{ev['lugar']}*")
-    else:
-        # Si no hay eventos, sale un mensaje verde fijo muy discreto
+    # Y AHORA SÍ, fuera de la función, pintamos en la web:
+    if not eventos:
         st.success("✅ Hoy no hay eventos multitudinarios que afecten al tráfico.")
+    else:
+        for evento in eventos:
+            st.info(f"🎭 {evento['titulo']} a las {evento['hora']}")
 
     
 # --- AQUÍ YA VAN TUS PESTAÑAS (Solo dejas las dos de las cámaras) ---

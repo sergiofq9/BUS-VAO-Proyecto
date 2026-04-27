@@ -62,7 +62,16 @@ def analizar_busvao_con_ia(_imagen_pil, tipo_panel): # <-- Añadimos el guion ba
         estado_final = "ABIERTO" if "ABIERTO" in respuesta_texto else "CERRADO"
         if "DESCONOCIDO" in respuesta_texto: estado_final = "DESCONOCIDO"
         
-        return {"estado": estado_final}
+        es_abierto = (estado_final == "ABIERTO")
+        
+        return {
+            "estado": estado_final,
+            "bus": es_abierto,
+            "motos": es_abierto,
+            "mas2": es_abierto,
+            "cero": es_abierto
+        }
+    
 
     except Exception as e:
         if "429" in str(e):
